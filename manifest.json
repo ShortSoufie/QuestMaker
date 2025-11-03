@@ -1,7 +1,7 @@
 {
   "name": "QuestMaker",
   "short_name": "QuestMaker",
-  "start_url": ".",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#d8c39a",
   "theme_color": "#b5884a",
