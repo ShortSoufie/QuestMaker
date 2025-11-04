@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
 <meta name="theme-color" content="#b5884a" />
 <link rel="manifest" href="manifest.json">
-<title>QuestMaker — Parchment UI</title>
+<title>QuestMaker</title>
 
 <style>
 :root {
@@ -161,6 +161,20 @@ label{display:block;margin-top:10px;color:var(--muted);font-weight:700}
 .row { display:flex; gap:8px; flex-wrap:wrap }
 .footer-actions { margin-top:12px; display:flex; gap:8px; justify-content:space-between; align-items:center; flex-wrap:wrap }
 .hidden { display:none !important }
+
+  /* --- fix Export/Import/Clear button sizes --- */
+  #exportBtn, label.small-btn, #clearBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;      /* match other buttons */
+    height: 38px;          /* consistent height */
+    padding: 0 12px;       /* consistent horizontal padding */
+  }
+  label.small-btn input {
+    display: none;          /* keep file input hidden */
+  }
+
 </style>
 </head>
 
@@ -213,9 +227,10 @@ label{display:block;margin-top:10px;color:var(--muted);font-weight:700}
                   <option>Easy</option><option>Medium</option><option>Hard</option><option>Master</option>
                 </select>
               </div>
-              <div style="flex:1">
-                <label>Length</label><input id="length" placeholder="e.g. 30 days">
-              </div>
+              	<div style="flex:1">
+  			<label>Target Date</label>
+  			<input id="targetDate" type="date">
+		</div>
             </div>
             <label>Required Quests</label><input id="required" placeholder="comma-separated IDs">
             <label>Reward</label><input id="reward">
@@ -233,309 +248,341 @@ label{display:block;margin-top:10px;color:var(--muted);font-weight:700}
     </div>
   </main>
 </div>
-  <script>
-    /* ---------- storage & model ---------- */
-    const STORAGE_KEY = 'questmaker_v1';
+<script>
+  /* ---------- storage & model ---------- */
+  const STORAGE_KEY = 'questmaker_v1';
 
-    function uid(prefix='q') {
-      return prefix + '_' + Math.random().toString(36).slice(2,10);
+  function uid(prefix='q') {
+    return prefix + '_' + Math.random().toString(36).slice(2,10);
+  }
+
+  function nowISO(){ return new Date().toISOString(); }
+
+  function loadState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return { quests: [] };
+      return JSON.parse(raw);
+    } catch(e) {
+      console.warn('Failed to parse state', e);
+      return { quests: [] };
     }
+  }
+  function saveState(state) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
 
-    function nowISO(){ return new Date().toISOString(); }
+  let state = loadState();
 
-    function loadState() {
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) return { quests: [] };
-        return JSON.parse(raw);
-      } catch(e) {
-        console.warn('Failed to parse state', e);
-        return { quests: [] };
-      }
+  /* ---------- UI references ---------- */
+  const questListEl = document.getElementById('questList');
+  const panelTitle = document.getElementById('panelTitle');
+  const panelSubtitle = document.getElementById('panelSubtitle');
+  const detailArea = document.getElementById('detailArea');
+  const formArea = document.getElementById('formArea');
+  const mainView = document.getElementById('mainView');
+
+  const newQuestBtn = document.getElementById('newQuestBtn');
+  const exportBtn = document.getElementById('exportBtn');
+  const importFile = document.getElementById('importFile');
+  const clearBtn = document.getElementById('clearBtn');
+  const filterInput = document.getElementById('filterInput');
+
+  const viewBtn = document.getElementById('viewBtn');
+  const makeBtn = document.getElementById('makeBtn');
+  const completedBtn = document.getElementById('completedBtn');
+
+  /* form */
+  const questForm = document.getElementById('questForm');
+  const questIdInput = document.getElementById('questId');
+  const titleInput = document.getElementById('title');
+  const difficultyInput = document.getElementById('difficulty');
+  const targetDateInput = document.getElementById('targetDate');
+  const requiredInput = document.getElementById('required');
+  const rewardInput = document.getElementById('reward');
+  const descriptionInput = document.getElementById('description');
+  const cancelEdit = document.getElementById('cancelEdit');
+
+  /* ---------- helpers ---------- */
+  function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  function daysLeftText(q) {
+    if (!q.targetDate) return '—';
+    const now = new Date();
+    const target = new Date(q.targetDate);
+    const diff = Math.floor((target - now) / (1000 * 60 * 60 * 24));
+    if (diff > 0) return `${diff} day${diff === 1 ? '' : 's'} left`;
+    if (diff === 0) return 'Today';
+    return `Overdue by ${Math.abs(diff)} day${Math.abs(diff) === 1 ? '' : 's'}`;
+  }
+
+  /* ---------- rendering ---------- */
+  function renderList(filter = '') {
+    questListEl.innerHTML = '';
+    const qlist = state.quests
+      .filter(q => !q.completed)
+      .filter(q => {
+        if (!filter) return true;
+        const s = filter.toLowerCase();
+        return q.title.toLowerCase().includes(s) || q.difficulty.toLowerCase().includes(s);
+      })
+      .sort((a,b) => (a.createdAt < b.createdAt ? 1 : -1));
+    if (qlist.length === 0) {
+      questListEl.innerHTML = '<div class="muted" style="padding:12px">No active quests. Create one!</div>';
+      return;
     }
-    function saveState(state) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    }
-
-    let state = loadState();
-
-    /* ---------- UI references ---------- */
-    const questListEl = document.getElementById('questList');
-    const panelTitle = document.getElementById('panelTitle');
-    const panelSubtitle = document.getElementById('panelSubtitle');
-    const detailArea = document.getElementById('detailArea');
-    const formArea = document.getElementById('formArea');
-    const mainView = document.getElementById('mainView');
-
-    const newQuestBtn = document.getElementById('newQuestBtn');
-    const exportBtn = document.getElementById('exportBtn');
-    const importFile = document.getElementById('importFile');
-    const clearBtn = document.getElementById('clearBtn');
-    const filterInput = document.getElementById('filterInput');
-
-    const viewBtn = document.getElementById('viewBtn');
-    const makeBtn = document.getElementById('makeBtn');
-    const completedBtn = document.getElementById('completedBtn');
-
-    /* form */
-    const questForm = document.getElementById('questForm');
-    const questIdInput = document.getElementById('questId');
-    const titleInput = document.getElementById('title');
-    const difficultyInput = document.getElementById('difficulty');
-    const lengthInput = document.getElementById('length');
-    const requiredInput = document.getElementById('required');
-    const rewardInput = document.getElementById('reward');
-    const descriptionInput = document.getElementById('description');
-    const cancelEdit = document.getElementById('cancelEdit');
-
-    /* ---------- rendering ---------- */
-    function renderList(filter = '') {
-      questListEl.innerHTML = '';
-      const qlist = state.quests
-        .filter(q => !q.completed)
-        .filter(q => {
-          if (!filter) return true;
-          const s = filter.toLowerCase();
-          return q.title.toLowerCase().includes(s) || q.difficulty.toLowerCase().includes(s);
-        })
-        .sort((a,b) => (a.createdAt < b.createdAt ? 1 : -1));
-      if (qlist.length === 0) {
-        questListEl.innerHTML = '<div class="muted" style="padding:12px">No active quests. Create one!</div>';
-        return;
-      }
-      qlist.forEach(q => {
-        const div = document.createElement('div');
-        div.className = 'quest-item';
-        div.dataset.id = q.id;
-        div.innerHTML = `
-          <div>
-            <div class="title">${escapeHtml(q.title)}</div>
-            <div class="meta">${escapeHtml(q.difficulty)} • ${escapeHtml(q.length||'—')} • Reward: ${escapeHtml(q.reward||'—')}</div>
-          </div>
-          <div class="row">
-            <button class="small-btn view-btn" title="Open">Open</button>
-            <button class="small-btn" data-edit="${q.id}" title="Edit">Edit</button>
-          </div>
-        `;
-        questListEl.appendChild(div);
-        div.querySelector('.view-btn').onclick = () => showDetail(q.id);
-        div.querySelector('[data-edit]').onclick = () => openFormForEdit(q.id);
-      });
-    }
-
-    function renderCompleted() {
-      questListEl.innerHTML = '';
-      const qlist = state.quests
-        .filter(q => q.completed)
-        .sort((a,b) => (a.completedAt < b.completedAt ? 1 : -1));
-      if (qlist.length === 0) {
-        questListEl.innerHTML = '<div class="muted" style="padding:12px">No completed quests yet.</div>';
-        return;
-      }
-      qlist.forEach(q => {
-        const div = document.createElement('div');
-        div.className = 'quest-item';
-        div.dataset.id = q.id;
-        div.innerHTML = `
-          <div>
-            <div class="title">${escapeHtml(q.title)}</div>
-            <div class="meta">Completed ${new Date(q.completedAt).toLocaleString()} • Reward: ${escapeHtml(q.reward||'—')}</div>
-          </div>
-          <div class="row">
-            <button class="small-btn view-btn" title="Open">Open</button>
-            <button class="small-btn danger" data-delete="${q.id}" title="Delete">Delete</button>
-          </div>
-        `;
-        questListEl.appendChild(div);
-        div.querySelector('.view-btn').onclick = () => showDetail(q.id);
-        div.querySelector('[data-delete]').onclick = () => { if(confirm('Delete permanently?')) { deleteQuest(q.id); } };
-      });
-    }
-
-    function showDetail(id) {
-      const q = state.quests.find(x => x.id === id);
-      if (!q) return alert('Quest not found');
-      detailArea.classList.remove('hidden');
-      formArea.classList.add('hidden');
-      panelTitle.textContent = q.title;
-      panelSubtitle.textContent = `${q.difficulty} • ${q.length || '—'} • Reward: ${q.reward || '—'}`;
-      detailArea.innerHTML = `
-        <div class="desc">${escapeHtml(q.description || 'No description')}</div>
-        <div class="meta-row" style="margin-top:12px">
-          <div><span class="label">Required:</span> <span class="value">${(q.required && q.required.length)? q.required.join(', ') : 'None'}</span></div>
-          <div><span class="label">Progress entries:</span> <span class="value">${(q.progress||[]).length}</span></div>
+    qlist.forEach(q => {
+      const div = document.createElement('div');
+      div.className = 'quest-item';
+      div.dataset.id = q.id;
+      div.innerHTML = `
+        <div>
+          <div class="title">${escapeHtml(q.title)}</div>
+          <div class="meta">${escapeHtml(q.difficulty)} • ${daysLeftText(q)} • Reward: ${escapeHtml(q.reward||'—')}</div>
         </div>
-
-        <div style="margin-top:12px">
-          <h4 style="margin:6px 0;color:var(--accent)">Progress</h4>
-          <div id="progressList">${(q.progress||[]).map(p => `<div style="padding:8px;border-radius:6px;background:rgba(0,0,0,0.03);margin-bottom:6px"><div style="font-weight:800">${escapeHtml(p.note)}</div><div class="muted">${new Date(p.at).toLocaleString()}</div></div>`).join('') || '<div class="muted">No progress yet</div>'}</div>
-
-          <div style="margin-top:8px">
-            <textarea id="progressNote" placeholder="Write progress note..."></textarea>
-            <div style="display:flex;gap:8px;margin-top:8px">
-              <button id="addProgressBtn" class="small-btn">Add progress</button>
-              <button id="completeQuestBtn" class="small-btn">Mark complete</button>
-              <button id="editQuestBtn" class="small-btn">Edit quest</button>
-            </div>
-          </div>
+        <div class="row">
+          <button class="small-btn view-btn" title="Open">Open</button>
+          <button class="small-btn" data-edit="${q.id}" title="Edit">Edit</button>
         </div>
       `;
-      document.getElementById('addProgressBtn').onclick = () => {
-        const note = document.getElementById('progressNote').value.trim();
-        if (!note) return alert('Write something about your progress.');
-        q.progress = q.progress || [];
-        q.progress.push({ at: nowISO(), note });
-        saveState(state);
-        renderList(filterInput.value);
-        showDetail(q.id);
-      };
-      document.getElementById('completeQuestBtn').onclick = () => {
-        if (!confirm('Mark this quest as complete?')) return;
-        q.completed = true;
-        q.completedAt = nowISO();
-        saveState(state);
-        renderList(filterInput.value);
-        detailArea.classList.add('hidden');
-        panelTitle.textContent = 'Completed';
-        panelSubtitle.textContent = 'Quest completed.';
-      };
-      document.getElementById('editQuestBtn').onclick = () => openFormForEdit(q.id);
-    }
+      questListEl.appendChild(div);
+      div.querySelector('.view-btn').onclick = () => showDetail(q.id);
+      div.querySelector('[data-edit]').onclick = () => openFormForEdit(q.id);
+    });
+  }
 
-    function openFormForEdit(id) {
-      detailArea.classList.add('hidden');
-      formArea.classList.remove('hidden');
-      panelTitle.textContent = id ? 'Edit Quest' : 'New Quest';
-      panelSubtitle.textContent = id ? 'Modify fields and save.' : 'Fill details to create a quest.';
-      if (!id) {
-        questIdInput.value = '';
-        titleInput.value = '';
-        difficultyInput.value = 'Easy';
-        lengthInput.value = '';
-        requiredInput.value = '';
-        rewardInput.value = '';
-        descriptionInput.value = '';
-      } else {
-        const q = state.quests.find(x => x.id === id);
-        if (!q) return alert('Quest not found');
-        questIdInput.value = q.id;
-        titleInput.value = q.title;
-        difficultyInput.value = q.difficulty;
-        lengthInput.value = q.length || '';
-        requiredInput.value = (q.required || []).join(',');
-        rewardInput.value = q.reward || '';
-        descriptionInput.value = q.description || '';
-      }
+  function renderCompleted() {
+    questListEl.innerHTML = '';
+    const qlist = state.quests
+      .filter(q => q.completed)
+      .sort((a,b) => (a.completedAt < b.completedAt ? 1 : -1));
+    if (qlist.length === 0) {
+      questListEl.innerHTML = '<div class="muted" style="padding:12px">No completed quests yet.</div>';
+      return;
     }
+    qlist.forEach(q => {
+      const div = document.createElement('div');
+      div.className = 'quest-item';
+      div.dataset.id = q.id;
+      div.innerHTML = `
+        <div>
+          <div class="title">${escapeHtml(q.title)}</div>
+          <div class="meta">Completed ${new Date(q.completedAt).toLocaleString()} • Reward: ${escapeHtml(q.reward||'—')}</div>
+        </div>
+        <div class="row">
+          <button class="small-btn view-btn" title="Open">Open</button>
+          <button class="small-btn danger" data-delete="${q.id}" title="Delete">Delete</button>
+        </div>
+      `;
+      questListEl.appendChild(div);
+      div.querySelector('.view-btn').onclick = () => showDetail(q.id);
+      div.querySelector('[data-delete]').onclick = () => { if(confirm('Delete permanently?')) { deleteQuest(q.id); } };
+    });
+  }
 
-    function deleteQuest(id) {
-      state.quests = state.quests.filter(q => q.id !== id);
+  function showDetail(id) {
+    const q = state.quests.find(x => x.id === id);
+    if (!q) return alert('Quest not found');
+    detailArea.classList.remove('hidden');
+    formArea.classList.add('hidden');
+    panelTitle.textContent = q.title;
+    panelSubtitle.textContent = `${q.difficulty} • ${daysLeftText(q)} • Reward: ${q.reward || '—'}`;
+    detailArea.innerHTML = `
+      <div class="desc">${escapeHtml(q.description || 'No description')}</div>
+      <div class="meta-row" style="margin-top:12px">
+        <div><span class="label">Required:</span> <span class="value">${(q.required && q.required.length)? q.required.join(', ') : 'None'}</span></div>
+        <div><span class="label">Progress entries:</span> <span class="value">${(q.progress||[]).length}</span></div>
+      </div>
+
+      <div style="margin-top:12px">
+        <h4 style="margin:6px 0;color:var(--accent)">Progress</h4>
+        <div id="progressList">${
+  (q.progress || [])
+    .slice()                     // copy array
+    .reverse()                   // newest first
+    .map(p => `
+      <div style="padding:8px;border-radius:6px;background:rgba(0,0,0,0.03);margin-bottom:6px">
+        <div style="font-weight:800">${escapeHtml(p.note)}</div>
+        <div class="muted">${new Date(p.at).toLocaleString()}</div>
+      </div>
+    `)
+    .join('') 
+  || '<div class="muted">No progress yet</div>'
+}</div>
+
+        <div style="margin-top:8px">
+          <textarea id="progressNote" placeholder="Write progress note..."></textarea>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button id="addProgressBtn" class="small-btn">Add progress</button>
+            <button id="completeQuestBtn" class="small-btn">Mark complete</button>
+            <button id="editQuestBtn" class="small-btn">Edit quest</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.getElementById('addProgressBtn').onclick = () => {
+      const note = document.getElementById('progressNote').value.trim();
+      if (!note) return alert('Write something about your progress.');
+      q.progress = q.progress || [];
+      q.progress.push({ at: nowISO(), note });
       saveState(state);
       renderList(filterInput.value);
-      panelTitle.textContent = 'Deleted';
-      detailArea.classList.add('hidden');
-    }
-
-    function escapeHtml(s){ return (s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-
-    /* ---------- form handling ---------- */
-    questForm.addEventListener('submit', e => {
-      e.preventDefault();
-      const id = questIdInput.value || uid();
-      const title = titleInput.value.trim();
-      if (!title) return alert('Title required');
-      const difficulty = difficultyInput.value;
-      const length = lengthInput.value.trim();
-      const required = requiredInput.value.split(',').map(s => s.trim()).filter(Boolean);
-      const reward = rewardInput.value.trim();
-      const description = descriptionInput.value.trim();
-      const existing = state.quests.find(q => q.id === id);
-      if (existing) {
-        Object.assign(existing, { title, difficulty, length, required, reward, description });
-      } else {
-        const q = {
-          id, title, difficulty, length, required, reward, description,
-          progress: [], completed:false, createdAt: nowISO()
-        };
-        state.quests.push(q);
-      }
+      showDetail(q.id);
+    };
+    document.getElementById('completeQuestBtn').onclick = () => {
+      if (!confirm('Mark this quest as complete?')) return;
+      q.completed = true;
+      q.completedAt = nowISO();
       saveState(state);
       renderList(filterInput.value);
-      formArea.classList.add('hidden');
-      detailArea.classList.remove('hidden');
-      showDetail(id);
-    });
-
-    cancelEdit.onclick = () => { formArea.classList.add('hidden'); detailArea.classList.add('hidden'); panelTitle.textContent = 'Welcome'; panelSubtitle.textContent = 'Select or create a quest to get started.'; };
-
-    /* ---------- helpers: export/import/clear ---------- */
-    exportBtn.onclick = () => {
-      const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'questmaker-export.json';
-      a.click();
-      URL.revokeObjectURL(url);
-    };
-
-    importFile.addEventListener('change', e => {
-      const f = e.target.files[0];
-      if (!f) return;
-      const reader = new FileReader();
-      reader.onload = ev => {
-        try {
-          const parsed = JSON.parse(ev.target.result);
-          if (!parsed || !Array.isArray(parsed.quests)) throw new Error('Invalid file format');
-          // naive merge: append new quests that don't have same id
-          const ids = new Set(state.quests.map(q=>q.id));
-          parsed.quests.forEach(q => { if (!ids.has(q.id)) state.quests.push(q); });
-          saveState(state);
-          renderList();
-          alert('Import completed (non-duplicate quests added).');
-        } catch(err) {
-          alert('Import failed: ' + err.message);
-        }
-      };
-      reader.readAsText(f);
-      e.target.value = '';
-    });
-
-    clearBtn.onclick = () => {
-      if (!confirm('Clear ALL quests on this device? This cannot be undone.')) return;
-      state = { quests: [] };
-      saveState(state);
-      renderList();
-      panelTitle.textContent = 'Welcome';
       detailArea.classList.add('hidden');
+      panelTitle.textContent = 'Completed';
+      panelSubtitle.textContent = 'Quest completed.';
     };
+    document.getElementById('editQuestBtn').onclick = () => openFormForEdit(q.id);
+  }
 
-    /* ---------- nav buttons ---------- */
-    viewBtn.onclick = () => { setActiveNav(viewBtn); renderList(filterInput.value); panelTitle.textContent = 'Quests'; panelSubtitle.textContent = 'Active quests'; formArea.classList.add('hidden'); detailArea.classList.add('hidden'); };
-    makeBtn.onclick = () => { setActiveNav(makeBtn); openFormForEdit(); panelTitle.textContent = 'Create Quest'; panelSubtitle.textContent = 'Create a new quest'; formArea.classList.remove('hidden'); detailArea.classList.add('hidden'); };
-    completedBtn.onclick = () => { setActiveNav(completedBtn); renderCompleted(); panelTitle.textContent = 'Completed'; panelSubtitle.textContent = 'Your completed quests'; formArea.classList.add('hidden'); detailArea.classList.add('hidden'); };
-
-    function setActiveNav(btn) {
-      document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+  function openFormForEdit(id) {
+    detailArea.classList.add('hidden');
+    formArea.classList.remove('hidden');
+    panelTitle.textContent = id ? 'Edit Quest' : 'New Quest';
+    panelSubtitle.textContent = id ? 'Modify fields and save.' : 'Fill details to create a quest.';
+    if (!id) {
+      questIdInput.value = '';
+      titleInput.value = '';
+      difficultyInput.value = 'Easy';
+      targetDateInput.value = '';
+      requiredInput.value = '';
+      rewardInput.value = '';
+      descriptionInput.value = '';
+    } else {
+      const q = state.quests.find(x => x.id === id);
+      if (!q) return alert('Quest not found');
+      questIdInput.value = q.id;
+      titleInput.value = q.title;
+      difficultyInput.value = q.difficulty;
+      targetDateInput.value = q.targetDate ? q.targetDate.slice(0,10) : '';
+      requiredInput.value = (q.required || []).join(',');
+      rewardInput.value = q.reward || '';
+      descriptionInput.value = q.description || '';
     }
+  }
 
-    newQuestBtn.onclick = () => { setActiveNav(makeBtn); openFormForEdit(); };
+  function deleteQuest(id) {
+    state.quests = state.quests.filter(q => q.id !== id);
+    saveState(state);
+    renderList(filterInput.value);
+    panelTitle.textContent = 'Deleted';
+    detailArea.classList.add('hidden');
+  }
 
-    filterInput.oninput = () => renderList(filterInput.value);
+  /* ---------- form handling ---------- */
+  questForm.addEventListener('submit', e => {
+    e.preventDefault();
+    const id = questIdInput.value || uid();
+    const title = titleInput.value.trim();
+    if (!title) return alert('Title required');
+    const difficulty = difficultyInput.value;
+    const targetDate = targetDateInput.value ? new Date(targetDateInput.value).toISOString() : null;
+    const required = requiredInput.value.split(',').map(s => s.trim()).filter(Boolean);
+    const reward = rewardInput.value.trim();
+    const description = descriptionInput.value.trim();
+    const existing = state.quests.find(q => q.id === id);
+    if (existing) {
+      Object.assign(existing, { title, difficulty, targetDate, required, reward, description });
+    } else {
+      const q = {
+        id, title, difficulty, targetDate, required, reward, description,
+        progress: [], completed:false, createdAt: nowISO()
+      };
+      state.quests.push(q);
+    }
+    saveState(state);
+    renderList(filterInput.value);
+    formArea.classList.add('hidden');
+    detailArea.classList.remove('hidden');
+    showDetail(id);
+  });
 
-    /* ---------- initial render ---------- */
-    if (!state.quests) state = { quests: [] };
+  cancelEdit.onclick = () => { 
+    formArea.classList.add('hidden'); 
+    detailArea.classList.add('hidden'); 
+    panelTitle.textContent = 'Welcome'; 
+    panelSubtitle.textContent = 'Select or create a quest to get started.'; 
+  };
+
+  /* ---------- helpers: export/import/clear ---------- */
+  exportBtn.onclick = () => {
+    const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'questmaker-export.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  importFile.addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (!parsed || !Array.isArray(parsed.quests)) throw new Error('Invalid file format');
+        const ids = new Set(state.quests.map(q=>q.id));
+        parsed.quests.forEach(q => { if (!ids.has(q.id)) state.quests.push(q); });
+        saveState(state);
+        renderList();
+        alert('Import completed (non-duplicate quests added).');
+      } catch(err) {
+        alert('Import failed: ' + err.message);
+      }
+    };
+    reader.readAsText(f);
+    e.target.value = '';
+  });
+
+  clearBtn.onclick = () => {
+    if (!confirm('Clear ALL quests on this device? This cannot be undone.')) return;
+    state = { quests: [] };
+    saveState(state);
     renderList();
+    panelTitle.textContent = 'Welcome';
+    detailArea.classList.add('hidden');
+  };
 
-    /* ---------- simple service worker registration (root) ---------- */
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./service-worker.js')
-          .then(reg => console.log('Service worker registered', reg))
-          .catch(err => console.warn('SW registration failed:', err));
-      });
-    }
-  </script>
+  /* ---------- nav buttons ---------- */
+  viewBtn.onclick = () => { setActiveNav(viewBtn); renderList(filterInput.value); panelTitle.textContent = 'Quests'; panelSubtitle.textContent = 'Active quests'; formArea.classList.add('hidden'); detailArea.classList.add('hidden'); };
+  makeBtn.onclick = () => { setActiveNav(makeBtn); openFormForEdit(); panelTitle.textContent = 'Create Quest'; panelSubtitle.textContent = 'Create a new quest'; formArea.classList.remove('hidden'); detailArea.classList.add('hidden'); };
+  completedBtn.onclick = () => { setActiveNav(completedBtn); renderCompleted(); panelTitle.textContent = 'Completed'; panelSubtitle.textContent = 'Your completed quests'; formArea.classList.add('hidden'); detailArea.classList.add('hidden'); };
+
+  function setActiveNav(btn) {
+    document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+
+  newQuestBtn.onclick = () => { setActiveNav(makeBtn); openFormForEdit(); };
+  filterInput.oninput = () => renderList(filterInput.value);
+
+  /* ---------- initial render ---------- */
+  if (!state.quests) state = { quests: [] };
+  renderList();
+
+  /* ---------- auto refresh countdown daily ---------- */
+  setInterval(() => {
+    if (viewBtn.classList.contains('active')) renderList(filterInput.value);
+  }, 1000 * 60 * 60 * 12); // every 12 hours
+
+  /* ---------- simple service worker registration ---------- */
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./service-worker.js')
+        .then(reg => console.log('Service worker registered', reg))
+        .catch(err => console.warn('SW registration failed:', err));
+    });
+  }
+</script>
+
 </body>
 </html>
